@@ -1,0 +1,1 @@
+{"results":[{"title":"Official project", "url":"https://example.org/project", "content":"Search snippet", "raw_content":"Implementation evidence from project documentation.", "score":0.9}, {"title":"Snippet only", "url":"https://example.org/other", "content":"A snippet is not a complete page", "raw_content":null}], "usage":{"credits":1}}

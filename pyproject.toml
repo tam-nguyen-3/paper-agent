@@ -1,0 +1,34 @@
+[project]
+name = "paper-research-agent"
+version = "0.1.0"
+description = "Local research tools for arXiv, web search, and citation exploration"
+readme = "README.md"
+authors = [
+    { name = "Tam Nguyen", email = "125776168+tam-nguyen-3@users.noreply.github.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.28,<1",
+    "pypdf>=6,<7",
+    "deepagents>=0.7.15",
+    "langchain>=1.4.2",
+    "langchain-openai>=1.6.2",
+    "python-dotenv>=1.2.3",
+]
+
+[project.scripts]
+paper-research = "paper_research.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.13,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "paper_research"
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7.3.0",
+    "notebook>=7.6.2",
+    "ruff>=0.16.8",
+]
