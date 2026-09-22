@@ -106,6 +106,7 @@ class PaperTests(unittest.TestCase):
             self.assertIn("Evidence page two", second["pages"][0]["text"])
             self.assertIsNone(second["next_page"])
             self.assertEqual(first["version"], "v2")
+            self.assertEqual(first["artifact_path"], "/papers/text/1234.56789v2.md")
             self.assertIn("1234.56789v2", download.call_args.args[2])
             metadata.assert_called_once()
             download.assert_called_once()
@@ -115,6 +116,25 @@ class PaperTests(unittest.TestCase):
             )
             with self.assertRaises(ValueError):
                 read_arxiv_paper("1234.56789", start_page=3, workspace_dir=root)
+
+    def test_legacy_identifier_is_preserved_in_artifact_path(self):
+        paper = dict(_parse_feed(FEED)["papers"][0])
+        paper["arxiv_id"] = "hep-th/9901001v2"
+        with (
+            TemporaryDirectory() as root,
+            patch("paper_research.services.paper_reader.lookup", return_value=paper),
+        ):
+            Cache(root).put("papers/pages", paper["arxiv_id"], ["Legacy evidence."])
+            result = read_arxiv_paper(paper["arxiv_id"], workspace_dir=root)
+
+            self.assertEqual(
+                result["artifact_path"],
+                "/papers/text/hep-th/9901001v2.md",
+            )
+            self.assertIn(
+                "Legacy evidence.",
+                (Path(root) / result["artifact_path"].lstrip("/")).read_text(),
+            )
 
     def test_pdf_failures_and_blank_pages(self):
         paper = _parse_feed(FEED)["papers"][0]
@@ -290,6 +310,13 @@ class InfrastructureTests(unittest.TestCase):
             self.assertIsNone(cache.get("test", {"key": 1}, ttl=0))
             self.assertIsNotNone(cache.get("test", {"key": 1}, ttl=None))
             self.assertEqual(list(Path(root).rglob(".tmp-*")), [])
+
+    def test_named_artifact_rejects_path_escape(self):
+        with (
+            TemporaryDirectory() as root,
+            self.assertRaisesRegex(ValueError, "within its namespace"),
+        ):
+            Cache(root).named_artifact("papers/text", "../../outside", "no")
 
     def test_http_retries_timeouts_and_long_retry_after(self):
         real_client = httpx.Client

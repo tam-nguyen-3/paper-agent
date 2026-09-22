@@ -50,3 +50,15 @@ class Cache:
         path = self.path(namespace, key, ".md")
         self.write(path, text.encode())
         return "/" + path.relative_to(self.root).as_posix()
+
+    def named_artifact(self, namespace, name, text):
+        """Write an artifact under a stable, human-readable virtual path."""
+        directory = (self.root / namespace).resolve()
+        path = (directory / f"{name}.md").resolve()
+        try:
+            directory.relative_to(self.root)
+            path.relative_to(directory)
+        except ValueError:
+            raise ValueError("artifact path must stay within its namespace") from None
+        self.write(path, text.encode())
+        return "/" + path.relative_to(self.root).as_posix()

@@ -5,7 +5,7 @@ import re
 
 from pypdf import PdfReader
 
-from ..core.cache import Cache, DEFAULT_WORKSPACE
+from ..core.cache import DEFAULT_WORKSPACE, Cache
 from ..core.http import ProviderError, request
 from ..models import Document
 from ..providers.arxiv import lookup, normalize_arxiv_id
@@ -56,7 +56,7 @@ def read_arxiv_paper(
     cache.put("cache/paper-pins", requested, paper)
     if start_page > len(pages):
         raise ValueError(f"start_page exceeds the document's {len(pages)} pages")
-    artifact = cache.artifact(
+    artifact = cache.named_artifact(
         "papers/text",
         resolved,
         f"# {paper['title']}\n\nSource: {pdf_url}\nVersion: {version[0]}\n\n"
