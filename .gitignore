@@ -6,7 +6,17 @@ dist/
 wheels/
 *.egg-info
 
+# Tool and notebook caches
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
 # Virtual environments
 .venv
 .env
+
+# Generated research data and outputs
 research_data/
+output/
+outputs/
