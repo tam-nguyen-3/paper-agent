@@ -4,18 +4,17 @@ from __future__ import annotations
 
 import re
 from typing import Literal
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, urlencode, urlparse
 from xml.etree import ElementTree
 
-from ..models import Paper, SearchResult
-from ..core.cache import Cache, DEFAULT_WORKSPACE
+from ..core.cache import DEFAULT_WORKSPACE, Cache
 from ..core.http import ProviderError, request
+from ..models import Paper, SearchResult
 
 API_URL = "https://export.arxiv.org/api/query"
 USER_AGENT = (
     "simple-arxiv-search/0.1 (mailto:125776168+tam-nguyen-3@users.noreply.github.com)"
 )
-
 SortBy = Literal["relevance", "lastUpdatedDate", "submittedDate"]
 SortOrder = Literal["ascending", "descending"]
 
@@ -159,9 +158,9 @@ def search(
         "search_query": query.strip(),
         "start": start,
         "max_results": max_results,
-        "sortBy": sort_by,
-        "sortOrder": sort_order,
     }
+    if sort_by != "relevance":
+        params.update(sortBy=sort_by, sortOrder=sort_order)
     return _query(params, timeout, workspace_dir)
 
 
@@ -170,12 +169,13 @@ def _query(params, timeout, workspace_dir):
     cached = cache.get("cache/arxiv", params)
     if cached is not None:
         return cached
+    query_url = f"{API_URL}?{urlencode(params)}"
+    print(f"Querying arXiv API: {query_url}")
     try:
         response = request(
             "arxiv",
             "GET",
-            API_URL,
-            params=params,
+            query_url,
             timeout=timeout,
             headers={"Accept": "application/atom+xml", "User-Agent": USER_AGENT},
         )

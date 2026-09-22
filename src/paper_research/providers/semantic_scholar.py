@@ -2,17 +2,17 @@
 
 import os
 import re
+from datetime import UTC, datetime
 from typing import Literal
 from urllib.parse import quote, unquote, urlparse
 
-from ..core.cache import Cache, DEFAULT_WORKSPACE
-from ..core.http import ProviderError, request_json, utcnow
+from ..core.cache import DEFAULT_WORKSPACE, Cache
+from ..core.http import ProviderError, request_json
 from ..models import CitationGraph
 from .arxiv import normalize_arxiv_id
 
 BASE = "https://api.semanticscholar.org/graph/v1/paper/"
 FIELDS = "paperId,title,year,authors,url,externalIds"
-
 
 def normalize_citation_id(value):
     """Normalize DOI, arXiv, and explicit Semantic Scholar identifiers."""
@@ -73,9 +73,13 @@ def get_citation_graph(
             return cached
         result = {
             "data": request_json(
-                "semantic_scholar", "GET", url, params=params, headers=headers
+                "semantic_scholar",
+                "GET",
+                url,
+                params=params,
+                headers=headers,
             ),
-            "retrieved_at": utcnow(),
+            "retrieved_at": datetime.now(UTC).isoformat(),
         }
         cache.put("cache/citations", key, result)
         return result
@@ -85,7 +89,7 @@ def get_citation_graph(
         "requested_id": paper_id,
         "requested_arxiv_id": requested_arxiv,
         "provider": "semantic_scholar",
-        "retrieved_at": utcnow(),
+        "retrieved_at": datetime.now(UTC).isoformat(),
         "direction": direction,
         "seed": None,
         "nodes": [],

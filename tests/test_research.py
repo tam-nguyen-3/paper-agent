@@ -7,14 +7,14 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import httpx
 from pypdf import PdfWriter
 from pypdf.generic import DictionaryObject, NameObject, DecodedStreamObject
 
 from paper_research.core.cache import Cache
-from paper_research.core.http import ProviderError, Limiter, request, retry_delay
+from paper_research.core.http import ProviderError, request, retry_delay
 from paper_research.providers.arxiv import _parse_feed, lookup, normalize_arxiv_id
 from paper_research.providers.semantic_scholar import (
     get_citation_graph,
@@ -83,7 +83,8 @@ class PaperTests(unittest.TestCase):
             self.assertEqual(
                 lookup("1234.56789v2", workspace_dir=root)["arxiv_id"], "1234.56789v2"
             )
-            self.assertEqual(req.call_args.kwargs["params"]["id_list"], "1234.56789v2")
+            query = httpx.URL(req.call_args.args[2]).params
+            self.assertEqual(query["id_list"], "1234.56789v2")
 
     def test_real_pdf_extraction_pages_and_pinned_cache(self):
         paper = _parse_feed(FEED)["papers"][0]
@@ -297,7 +298,7 @@ class InfrastructureTests(unittest.TestCase):
 
             def handler(req):
                 calls.append(req)
-                self.assertEqual(req.headers["accept-encoding"], "identity")
+                self.assertEqual(req.headers["user-agent"], "paper-research-agent/0.1")
                 if mode == "timeout":
                     raise httpx.ReadTimeout("timeout", request=req)
                 if mode == "retry" and len(calls) == 3:
@@ -313,29 +314,84 @@ class InfrastructureTests(unittest.TestCase):
                         transport=httpx.MockTransport(handler), **kw
                     ),
                 ),
-                patch.dict("paper_research.core.http.LIMITERS", {"arxiv": Limiter(0)}),
-                patch("paper_research.core.http.time.sleep"),
+                patch("paper_research.core.http.time.sleep") as sleep,
             ):
                 if mode == "retry":
                     self.assertEqual(
-                        request("arxiv", "GET", "https://example.org").content, b"ok"
+                        request("arxiv", "GET", "https://example.org").content,
+                        b"ok",
                     )
                 else:
                     with self.assertRaises(ProviderError):
                         request("arxiv", "GET", "https://example.org")
                 self.assertEqual(len(calls), expected_calls)
+                expected_sleeps = {
+                    "retry": [call(4), call(0), call(4), call(0), call(4)],
+                    "timeout": [call(4), call(1), call(4), call(2), call(4)],
+                    "long": [call(4)],
+                }
+                self.assertEqual(sleep.call_args_list, expected_sleeps[mode])
 
-    def test_pacing(self):
-        limiter = Limiter(3)
-        with (
-            patch("paper_research.core.http.time.monotonic", side_effect=[10, 11, 13]),
-            patch("paper_research.core.http.time.sleep") as sleep,
+    def test_provider_request_delays(self):
+        real_client = httpx.Client
+
+        with patch(
+            "paper_research.core.http.httpx.Client",
+            side_effect=lambda **kw: real_client(
+                transport=httpx.MockTransport(
+                    lambda request: httpx.Response(200, content=b"ok")
+                ),
+                **kw,
+            ),
         ):
-            limiter.wait()
-            limiter.wait()
-            sleep.assert_called_once_with(2)
+            for provider, expected_delay in (
+                ("arxiv", 4),
+                ("semantic_scholar", 1),
+                ("tavily", None),
+            ):
+                with self.subTest(provider=provider), patch(
+                    "paper_research.core.http.time.sleep"
+                ) as sleep:
+                    request(provider, "GET", "https://example.org")
+                    if expected_delay is None:
+                        sleep.assert_not_called()
+                    else:
+                        sleep.assert_called_once_with(expected_delay)
+
+    def test_retry_delay_http_date(self):
         with patch("paper_research.core.http.time.time", return_value=0):
             self.assertEqual(retry_delay("Thu, 01 Jan 1970 00:00:10 GMT", 0), 10)
+
+    def test_http_error_includes_endpoint_and_bounded_body_excerpt(self):
+        real_client = httpx.Client
+
+        def handler(request):
+            return httpx.Response(406, content=b"  Not acceptable\n" + b"x" * 400)
+
+        with (
+            patch(
+                "paper_research.core.http.httpx.Client",
+                side_effect=lambda **kw: real_client(
+                    transport=httpx.MockTransport(handler), **kw
+                ),
+            ),
+            patch("paper_research.core.http.time.sleep"),
+            self.assertRaises(ProviderError) as caught,
+        ):
+            request(
+                "arxiv",
+                "GET",
+                "https://export.arxiv.org/api/query?secret=hidden",
+            )
+
+        message = str(caught.exception)
+        self.assertIn(
+            "arxiv: HTTP 406 from https://export.arxiv.org/api/query", message
+        )
+        self.assertIn("; response: Not acceptable ", message)
+        self.assertNotIn("secret", message)
+        self.assertTrue(message.endswith("..."))
+        self.assertLessEqual(len(message.rsplit("; response: ", 1)[1]), 300)
 
     def test_plain_import_is_lazy_and_tool_exports_work(self):
         subprocess.run(

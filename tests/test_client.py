@@ -1,10 +1,11 @@
+from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
-from tempfile import TemporaryDirectory
+from urllib.parse import parse_qs, urlparse
+
 import httpx
 
 from paper_research.providers.arxiv import _parse_feed, search
-
 
 FEED = b"""<?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom"
@@ -56,11 +57,22 @@ class ArxivClientTests(TestCase):
                     sort_by="submittedDate",
                     workspace_dir=directory,
                 )
-        params = mocked_request.call_args.kwargs["params"]
-        self.assertEqual(params["search_query"], 'cat:cs.AI AND ti:"tool use"')
-        self.assertEqual(params["max_results"], 7)
-        self.assertEqual(params["sortBy"], "submittedDate")
+        query = parse_qs(urlparse(mocked_request.call_args.args[2]).query)
+        self.assertEqual(query["search_query"], ['cat:cs.AI AND ti:"tool use"'])
+        self.assertEqual(query["max_results"], ["7"])
+        self.assertEqual(query["sortBy"], ["submittedDate"])
         mocked_request.assert_called_once()
+
+    @patch(
+        "paper_research.providers.arxiv.request",
+        return_value=httpx.Response(200, content=FEED),
+    )
+    def test_default_relevance_uses_api_default(self, mocked_request):
+        with TemporaryDirectory() as directory:
+            search("all:agents", workspace_dir=directory)
+        query = parse_qs(urlparse(mocked_request.call_args.args[2]).query)
+        self.assertNotIn("sortBy", query)
+        self.assertNotIn("sortOrder", query)
 
     def test_atom_errors_and_nonfeeds_are_not_papers(self):
         from paper_research import ArxivAPIError

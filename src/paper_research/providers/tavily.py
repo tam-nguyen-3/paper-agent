@@ -1,10 +1,11 @@
 """Optional basic web search, with extracted content saved as artifacts."""
 
 import os
+from datetime import UTC, datetime
 from typing import Literal
 
-from ..core.cache import Cache, DEFAULT_WORKSPACE
-from ..core.http import ProviderError, request_json, utcnow
+from ..core.cache import DEFAULT_WORKSPACE, Cache
+from ..core.http import ProviderError, request_json
 from ..models import WebSearchResult
 
 
@@ -56,7 +57,7 @@ def search_web(
                 headers={"Authorization": "Bearer " + api_key},
                 json=params,
             ),
-            "retrieved_at": utcnow(),
+            "retrieved_at": datetime.now(UTC).isoformat(),
         }
         if not isinstance(cached["data"].get("results"), list):
             raise ProviderError("Tavily returned an invalid search result")
