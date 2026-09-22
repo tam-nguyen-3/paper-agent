@@ -1,20 +1,184 @@
-# Local research tools
+# Paper Research Agent
 
-A local Deep Agents prototype with arXiv search, PDF reading, citation exploration,
-and optional Tavily web search. No database service or web server is required.
+Paper Research Agent is a local command-line project for finding and studying
+academic papers. Give it a research question and a language model can choose from
+four focused tools:
 
-## Setup
+- search arXiv for papers and abstracts;
+- download an arXiv PDF and read it page by page;
+- follow a paper's references or find later papers that cite it; and
+- optionally search the web for code, project pages, and other supporting sources.
+
+The language model acts as the researcher: it decides which tool to use next,
+compares the evidence it finds, and writes an answer with source locations. The
+tools do the factual retrieval. This separation is the basic idea behind
+"agentic" programming: instead of following one fixed sequence, the program lets
+the model select the next action based on what it has learned so far.
+
+Everything runs from the command line and stores downloaded or extracted material
+under `research_data/`. No database or web server is required.
+
+## Quick start
+
+### 1. Install the prerequisites
+
+You need Python 3.11 or newer, [`uv`](https://docs.astral.sh/uv/), and credentials
+for a chat-model provider. The project includes the OpenAI integration; using a
+different provider may require installing its LangChain integration package.
+
+### 2. Install the project
+
+From the repository root, run:
 
 ```bash
 uv sync
 ```
 
-Use `.env.example` as a template for your local `.env`. Add `TAVILY_API_KEY` only
-if you want web search. `SEMANTIC_SCHOLAR_API_KEY` is optional but recommended
-because unauthenticated users share provider capacity. Configure your model's
-credentials separately. The example loads `.env`; library functions do not.
+### 3. Configure credentials
 
-## Use it directly
+Create a local environment file:
+
+```bash
+cp .env.example .env
+```
+
+Add the API key required by your chosen chat-model provider using that provider's
+documented environment-variable name. For example, an OpenAI model uses:
+
+```dotenv
+OPENAI_API_KEY=your-key-here
+```
+
+The agent cannot run without access to a model. The other keys are optional:
+
+- `SEMANTIC_SCHOLAR_API_KEY` gives citation lookups dedicated provider capacity.
+- `TAVILY_API_KEY` enables web searches for code and project pages.
+
+Do not commit `.env`. The runnable example loads this file automatically; code
+that imports the library directly must load its own environment.
+
+### 4. Ask a research question
+
+Replace `PROVIDER:MODEL` with the model identifier configured for your provider,
+such as `openai:<model-name>`:
+
+```bash
+uv run python examples/research.py --model PROVIDER:MODEL \
+  'Read arXiv:1706.03762v7 and explain its main method with page citations.'
+```
+
+Another useful prompt is:
+
+```bash
+uv run python examples/research.py --model PROVIDER:MODEL \
+  'Find recent papers about self-improving agents and compare their approaches.'
+```
+
+The first run may take longer because PDFs and API results have not yet been
+cached. Research artifacts are written to `research_data/` and reused where
+possible on later runs.
+
+## How a research workflow works
+
+An agent is a language model in a loop with a small set of tools. For this project,
+one loop looks like this:
+
+```text
+Your question
+    |
+    v
+Model chooses a research action
+    |
+    +--> search arXiv ---------> paper titles and abstracts
+    +--> read an arXiv PDF ----> text tied to physical PDF pages
+    +--> inspect citations ----> references or later citing papers
+    +--> search the web -------> code and project pages (optional)
+    |
+    v
+Model reviews the new evidence
+    |
+    +--> needs more evidence? Choose another action
+    |
+    v
+Answer with sources, limitations, and any coverage gaps
+```
+
+The model does not receive every paper at once. Search results are useful for
+choosing candidates, but an abstract is not enough evidence for a detailed claim.
+The agent can open promising PDFs, read relevant page ranges, and inspect the full
+extracted text saved in the workspace. It can also branch outward through a
+citation graph when the question calls for earlier foundations or later work.
+
+The built-in instructions tell the model to distinguish what a source says from
+its own interpretation, cite exact paper versions and physical PDF pages, and say
+when extraction or provider coverage is incomplete. As with any model-generated
+research, you should still verify important claims against the cited source.
+
+### Common workflows
+
+#### Explain one paper
+
+1. Resolve the requested arXiv ID to a specific version.
+2. Download the PDF and extract page-addressable text.
+3. Read relevant sections and, when needed, search the complete text artifact.
+4. Explain the method and limitations with version and page citations.
+
+Example prompt:
+
+```text
+Read 1706.03762v7 and explain the architecture, training objective, and stated
+limitations for a software engineer. Cite the PDF pages supporting each section.
+```
+
+#### Trace the ideas around a paper
+
+1. Read the starting paper to understand the idea of interest.
+2. Retrieve its references to find earlier work, or its citations to find later
+   work.
+3. Select relevant neighboring papers instead of treating citation count as a
+   measure of quality.
+4. Read the selected arXiv papers before comparing their claims.
+
+Citation data can be incomplete, and some related papers do not have an arXiv
+version that this project can download. The agent should report those gaps.
+
+#### Survey a topic
+
+1. Translate the question into one or more arXiv searches.
+2. Use titles and abstracts to shortlist papers.
+3. Read the strongest candidates and compare evidence from their full text.
+4. Optionally follow citations to widen the survey.
+5. Synthesize areas of agreement, differences, and unanswered questions.
+
+This is an iterative survey rather than a systematic literature review: API
+limits, search terms, and citation-provider coverage affect what it finds.
+
+#### Find papers and their official code
+
+1. Search arXiv and inspect the relevant papers.
+2. If `TAVILY_API_KEY` is configured, search the web for official repositories or
+   project pages.
+3. Inspect the returned page content before claiming that a repository is
+   official or implements the paper.
+4. Cite both the paper and the inspected web URL.
+
+Without a Tavily key, paper and citation research still works; the agent warns
+that web research is unavailable.
+
+## Search arXiv without an agent
+
+If you only need metadata, you can use the simpler search command. It calls arXiv
+directly and does not require a language model:
+
+```bash
+uv run paper-research 'cat:cs.AI AND all:"self improving agents"' \
+  --max-results 5 --sort-by submittedDate
+```
+
+The result is JSON containing metadata and abstracts. This command does not read
+PDFs, explore citations, or synthesize an answer.
+
+## Use the Python API directly
 
 ```python
 from paper_research import search
@@ -37,14 +201,7 @@ graph = get_citation_graph("1706.03762", direction="citations", limit=20)
 # web = search_web("Attention Is All You Need official code", include_domains=["github.com"])
 ```
 
-Or from the command line:
-
-```bash
-uv run paper-research 'cat:cs.AI AND all:"self improving agents"' \
-  --max-results 5 --sort-by submittedDate
-```
-
-## Give it to a LangChain or Deep Agents agent
+## Create an agent in Python
 
 ```python
 from paper_research import create_research_agent
@@ -66,11 +223,6 @@ print(result["messages"][-1].content)
 Here `model` is your configured chat model or a supported `provider:model` string.
 Without a Tavily key, the factory emits a warning and omits `search_web`.
 
-```bash
-uv run python examples/research.py --model PROVIDER:MODEL \
-  'Find recent agent papers and their official code; cite your sources.'
-```
-
 Top-level imports `search_arxiv`, `read_arxiv_paper`, `search_web`, and
 `get_citation_graph` are LangChain tool objects: call `.invoke({...})` or pass them
 to an agent. For plain Python functions use the provider imports above.
@@ -80,6 +232,40 @@ All tools must share the agent backend's workspace for artifact paths to work.
 The factory handles that binding. For a custom agent, use
 `paper_research.tools.build_tools(workspace_dir, web_enabled=True)` and configure a
 `FilesystemBackend` with the same root and `virtual_mode=True`.
+
+## Architecture
+
+The package has four layers. `agent.py` assembles the Deep Agents runtime and a
+shared filesystem; `tools/` exposes model-facing LangChain tools and translates
+expected failures into `ToolException`; `services/` coordinates workflows that
+span multiple operations; and `providers/` talks to external APIs. Shared cache,
+HTTP retry, rate-limit, and artifact behavior lives in `core/`.
+
+```text
+User
+  |
+  v
+Deep Agents runtime (agent.py) ------- shared FilesystemBackend
+  |                                         |
+  v                                         v
+LangChain tools (tools/)               research_data/ artifacts
+  |
+  +-- search_arxiv -----------> arXiv provider ------------------+
+  +-- read_arxiv_paper -------> paper reader service             |
+  |                                +-- arXiv lookup               |
+  |                                +-- PDF download/extraction    |
+  +-- get_citation_graph -----> Semantic Scholar provider        |
+  +-- search_web -------------> Tavily provider (optional)       |
+                                                               v
+                                             shared HTTP/cache (core/)
+```
+
+The tools complement rather than call one another: search finds candidate papers,
+the reader turns a selected arXiv PDF into page-addressable evidence, the citation
+graph expands from a known work, and web search finds non-arXiv material such as
+code or project pages. The agent decides when to combine them. All artifact-producing
+paths use the same workspace so the agent can inspect full text with its filesystem
+tools after a provider returns a compact result.
 
 ## Tool behavior
 
@@ -124,8 +310,10 @@ for credits and limits. No search-engine scraping fallback is implemented.
 ## Storage and request handling
 
 `research_data/` contains `cache/`, `papers/`, `web/`, and any agent-written
-`reports/`. Returned artifact paths such as `/papers/text/<hash>.md` are relative
-to this virtual root. For direct Python use, locate one with
+`reports/`. Paper text uses its exact, versioned arXiv identifier, for example
+`/papers/text/1706.03762v7.md`; legacy identifiers retain their category prefix,
+as in `/papers/text/hep-th/9901001v2.md`. These paths are relative to the virtual
+root. For direct Python use, locate one with
 `Path(workspace_dir) / artifact_path.lstrip("/")`.
 
 Metadata, citation pages, and web results use a 24-hour cache. Writes are atomic.
@@ -140,34 +328,16 @@ longer waits are surfaced to the caller. HTTP responses are capped at 50 MB.
 Expected provider failures raise `ProviderError` (arXiv uses `ArxivAPIError`), and
 LangChain adapters turn those into actionable tool error messages.
 
-## Structure and example research workflows
+## arXiv query syntax
 
-`providers/` contains external API adapters, `services/` contains workflows such
-as PDF retrieval and extraction, `tools/` contains thin LangChain adapters, and
-`core/` handles shared HTTP/cache behavior. `models.py` describes JSON-compatible
-results, while `agent.py` binds the tools and filesystem to one root. The arXiv
-provider and `paper-research` CLI are the metadata-search entry points.
-
-| Request | Workflow |
-| --- | --- |
-| Explain a paper's method and limitations | Read pages, inspect complete text, cite version/page |
-| Identify the work a method builds upon | Read seed, retrieve references, read selected arXiv neighbors |
-| Find follow-up work | Retrieve citing papers, paginate, inspect relevant papers |
-| Find recent papers and official code | Search arXiv, read papers, search web, inspect extracted project pages |
-
-Related papers without arXiv IDs cannot be downloaded with the arXiv reader.
-Provider gaps or missing extracted content should be reported, not filled with
-unsupported claims. The example includes instructions for evidence-backed
-answers and treating downloaded text as source material rather than instructions.
-
-The tool accepts the official arXiv query syntax. Useful fields include `all`,
+The search tool accepts the official arXiv query syntax. Useful fields include `all`,
 `ti` (title), `au` (author), `abs` (abstract), and `cat` (category). Clauses can
 be combined with `AND`, `OR`, and `ANDNOT`.
 
 The metadata client caps one request at 100 results. For pagination, pass `start`
 to the direct `search` function. Request pacing is enforced by the shared client.
 
-## Test
+## Run the tests
 
 ```bash
 uv run python -m unittest discover -s tests
